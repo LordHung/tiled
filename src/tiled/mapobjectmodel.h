@@ -86,6 +86,8 @@ public:
     MapObject *toMapObject(const QModelIndex &index) const;
     ObjectGroup *toLayer(const QModelIndex &index) const;
 
+    int toObjectIndex(const QModelIndex &parent, int row) const;
+
     void setMapDocument(MapDocument *mapDocument);
     MapDocument *mapDocument() const { return mMapDocument; }
 

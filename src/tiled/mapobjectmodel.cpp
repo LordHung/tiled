@@ -30,10 +30,13 @@
 
 #include <QCoreApplication>
 
-#define GROUPS_IN_DISPLAY_ORDER 1
-
 using namespace Tiled;
 using namespace Tiled::Internal;
+
+static int reverse(int index, int count)
+{
+    return count - index - 1;
+}
 
 MapObjectModel::MapObjectModel(QObject *parent):
     QAbstractItemModel(parent),
@@ -41,6 +44,7 @@ MapObjectModel::MapObjectModel(QObject *parent):
     mMap(nullptr),
     mObjectGroupIcon(QLatin1String(":/images/16x16/layer-object.png"))
 {
+    mObjectGroupIcon.addFile(QLatin1String(":/images/32x32/layer-object.png"));
 }
 
 QModelIndex MapObjectModel::index(int row, int column,
@@ -58,11 +62,13 @@ QModelIndex MapObjectModel::index(int row, int column,
     if (row >= og->objectCount())
         return QModelIndex();
 
+    int objectIndex = reverse(row, og->objectCount());
+
     // Paranoia: sometimes "fake" objects are in use (see createobjecttool)
-    if (!mObjects.contains(og->objects().at(row)))
+    if (!mObjects.contains(og->objects().at(objectIndex)))
         return QModelIndex();
 
-    return createIndex(row, column, mObjects[og->objects()[row]]);
+    return createIndex(row, column, mObjects[og->objects()[objectIndex]]);
 }
 
 QModelIndex MapObjectModel::parent(const QModelIndex &index) const
@@ -222,7 +228,8 @@ QModelIndex MapObjectModel::index(ObjectGroup *og) const
 
 QModelIndex MapObjectModel::index(MapObject *o, int column) const
 {
-    const int row = o->objectGroup()->objects().indexOf(o);
+    ObjectGroup *og = o->objectGroup();
+    const int row = reverse(og->objects().indexOf(o), og->objectCount());
     Q_ASSERT(mObjects[o]);
     return createIndex(row, column, mObjects[o]);
 }
@@ -254,6 +261,13 @@ ObjectGroup *MapObjectModel::toLayer(const QModelIndex &index) const
     return oog->mGroup ? oog->mGroup : oog->mObject->objectGroup();
 }
 
+int MapObjectModel::toObjectIndex(const QModelIndex &parent, int row) const
+{
+    ObjectGroup *og = toObjectGroup(parent);
+    Q_ASSERT(og);
+    return reverse(row, og->objectCount());
+}
+
 void MapObjectModel::setMapDocument(MapDocument *mapDocument)
 {
     if (mMapDocument == mapDocument)
@@ -267,8 +281,10 @@ void MapObjectModel::setMapDocument(MapDocument *mapDocument)
     mMap = nullptr;
 
     mObjectGroups.clear();
+
     qDeleteAll(mGroups);
     mGroups.clear();
+
     qDeleteAll(mObjects);
     mObjects.clear();
 
@@ -283,13 +299,9 @@ void MapObjectModel::setMapDocument(MapDocument *mapDocument)
                 this, &MapObjectModel::layerAboutToBeRemoved);
 
         for (ObjectGroup *og : mMap->objectGroups()) {
-#if GROUPS_IN_DISPLAY_ORDER
             mObjectGroups.prepend(og);
-#else
-            mObjectGroups.append(og);
-#endif
             mGroups.insert(og, new ObjectOrGroup(og));
-            foreach (MapObject *o, og->objects())
+            for (MapObject *o : og->objects())
                 mObjects.insert(o, new ObjectOrGroup(o));
         }
     }
@@ -302,23 +314,24 @@ void MapObjectModel::layerAdded(int index)
     Layer *layer = mMap->layerAt(index);
     if (ObjectGroup *og = layer->asObjectGroup()) {
         if (!mGroups.contains(og)) {
+            // Find any object group below the new object group
             ObjectGroup *prev = nullptr;
             for (index = index - 1; index >= 0; --index)
                 if ((prev = mMap->layerAt(index)->asObjectGroup()))
                     break;
-#if GROUPS_IN_DISPLAY_ORDER
-            index = prev ? mObjectGroups.indexOf(prev) : mObjectGroups.count();
-#else
-            index = prev ? mObjectGroups.indexOf(prev) + 1 : 0;
-#endif
-            mObjectGroups.insert(index, og);
-            const int row = mObjectGroups.indexOf(og);
+
+            // Insert before the object group below, or at the end (bottom)
+            int row = prev ? mObjectGroups.indexOf(prev) : mObjectGroups.count();
+
             beginInsertRows(QModelIndex(), row, row);
+
+            mObjectGroups.insert(row, og);
             mGroups.insert(og, new ObjectOrGroup(og));
-            foreach (MapObject *o, og->objects()) {
+            for (MapObject *o : og->objects()) {
                 if (!mObjects.contains(o))
                     mObjects.insert(o, new ObjectOrGroup(o));
             }
+
             endInsertRows();
         }
     }
@@ -341,7 +354,7 @@ void MapObjectModel::layerAboutToBeRemoved(int index)
         beginRemoveRows(QModelIndex(), row, row);
         mObjectGroups.removeAt(row);
         delete mGroups.take(og);
-        foreach (MapObject *o, og->objects())
+        for (MapObject *o : og->objects())
             delete mObjects.take(o);
 
         endRemoveRows();
@@ -350,32 +363,44 @@ void MapObjectModel::layerAboutToBeRemoved(int index)
 
 void MapObjectModel::insertObject(ObjectGroup *og, int index, MapObject *o)
 {
-    const int row = (index >= 0) ? index : og->objectCount();
+    if (index < 0)
+        index = og->objectCount();
+
+    const int row = reverse(index, og->objectCount()) + 1;
+
     beginInsertRows(this->index(og), row, row);
-    og->insertObject(row, o);
+    og->insertObject(index, o);
     mObjects.insert(o, new ObjectOrGroup(o));
     endInsertRows();
+
     emit objectsAdded(QList<MapObject*>() << o);
 }
 
 int MapObjectModel::removeObject(ObjectGroup *og, MapObject *o)
 {
-    QList<MapObject*> objects;
-    objects << o;
+    const int objectIndex = og->objects().indexOf(o);
+    const int row = reverse(objectIndex, og->objectCount());
 
-    const int row = og->objects().indexOf(o);
     beginRemoveRows(index(og), row, row);
-    og->removeObjectAt(row);
+    og->removeObjectAt(objectIndex);
     delete mObjects.take(o);
     endRemoveRows();
-    emit objectsRemoved(objects);
+
+    emit objectsRemoved(QList<MapObject*>() << o);
     return row;
 }
 
 void MapObjectModel::moveObjects(ObjectGroup *og, int from, int to, int count)
 {
     const QModelIndex parent = index(og);
-    if (!beginMoveRows(parent, from, from + count - 1, parent, to)) {
+
+    int objectCount = og->objectCount();
+
+    int sourceFirst = reverse(from + count - 1, objectCount);
+    int sourceLast = reverse(from, objectCount);
+    int destinationRow = reverse(to, objectCount) + 1;
+
+    if (!beginMoveRows(parent, sourceFirst, sourceLast, parent, destinationRow)) {
         Q_ASSERT(false); // The code should never attempt this
         return;
     }

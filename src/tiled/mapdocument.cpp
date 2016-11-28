@@ -830,20 +830,24 @@ void MapDocument::onObjectsRemoved(const QList<MapObject*> &objects)
 }
 
 void MapDocument::onMapObjectModelRowsInserted(const QModelIndex &parent,
-                                               int first, int last)
+                                               int firstRow, int lastRow)
 {
     ObjectGroup *objectGroup = mMapObjectModel->toObjectGroup(parent);
     if (!objectGroup) // we're not dealing with insertion of objects
         return;
 
-    emit objectsInserted(objectGroup, first, last);
-    onMapObjectModelRowsInsertedOrRemoved(parent, first, last);
+    // Map object model is reversed
+    const int firstObjectIndex = mMapObjectModel->toObjectIndex(parent, lastRow);
+    const int lastObjectIndex = mMapObjectModel->toObjectIndex(parent, firstRow);
+
+    emit objectsInserted(objectGroup, firstObjectIndex, lastObjectIndex);
+    onMapObjectModelRowsInsertedOrRemoved(parent, firstRow, lastRow);
 }
 
 void MapDocument::onMapObjectModelRowsInsertedOrRemoved(const QModelIndex &parent,
-                                                        int first, int last)
+                                                        int firstRow, int lastRow)
 {
-    Q_UNUSED(first)
+    Q_UNUSED(lastRow)
 
     ObjectGroup *objectGroup = mMapObjectModel->toObjectGroup(parent);
     if (!objectGroup)
@@ -851,8 +855,11 @@ void MapDocument::onMapObjectModelRowsInsertedOrRemoved(const QModelIndex &paren
 
     // Inserting or removing objects changes the index of any that come after
     const int lastIndex = objectGroup->objectCount() - 1;
-    if (last < lastIndex)
-        emit objectsIndexChanged(objectGroup, last + 1, lastIndex);
+
+    // Map object model is reversed
+    const int lastObjectIndex = mMapObjectModel->toObjectIndex(parent, firstRow);
+    if (lastObjectIndex < lastIndex)
+        emit objectsIndexChanged(objectGroup, lastObjectIndex + 1, lastIndex);
 }
 
 void MapDocument::onObjectsMoved(const QModelIndex &parent, int start, int end,
@@ -864,10 +871,14 @@ void MapDocument::onObjectsMoved(const QModelIndex &parent, int start, int end,
     ObjectGroup *objectGroup = mMapObjectModel->toObjectGroup(parent);
 
     // Determine the full range over which object indexes changed
-    const int first = qMin(start, row);
-    const int last = qMax(end, row - 1);
+    const int firstRow = qMin(start, row);
+    const int lastRow = qMax(end, row - 1);
 
-    emit objectsIndexChanged(objectGroup, first, last);
+    // Map object model is reversed
+    const int firstObjectIndex = mMapObjectModel->toObjectIndex(parent, lastRow);
+    const int lastObjectIndex = mMapObjectModel->toObjectIndex(parent, firstRow);
+
+    emit objectsIndexChanged(objectGroup, firstObjectIndex, lastObjectIndex);
 }
 
 void MapDocument::onLayerAdded(int index)

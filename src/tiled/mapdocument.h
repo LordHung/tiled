@@ -382,8 +382,8 @@ signals:
 private slots:
     void onObjectsRemoved(const QList<MapObject*> &objects);
 
-    void onMapObjectModelRowsInserted(const QModelIndex &parent, int first, int last);
-    void onMapObjectModelRowsInsertedOrRemoved(const QModelIndex &parent, int first, int last);
+    void onMapObjectModelRowsInserted(const QModelIndex &parent, int firstRow, int lastRow);
+    void onMapObjectModelRowsInsertedOrRemoved(const QModelIndex &parent, int firstRow, int lastRow);
     void onObjectsMoved(const QModelIndex &parent, int start, int end,
                         const QModelIndex &destination, int row);
 
